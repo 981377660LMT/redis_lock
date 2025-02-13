@@ -14,6 +14,7 @@ type RedLock struct {
 	RedLockOptions
 }
 
+// 用户在创建红锁时，需要通过传入一个 SingleNodeConf 列表的方式，显式指定每个 redis 锁节点的地址信息
 func NewRedLock(key string, confs []*SingleNodeConf, opts ...RedLockOption) (*RedLock, error) {
 	// 3 个节点以上，红锁才有意义
 	if len(confs) < 3 {
@@ -27,7 +28,8 @@ func NewRedLock(key string, confs []*SingleNodeConf, opts ...RedLockOption) (*Re
 
 	repairRedLock(&r.RedLockOptions)
 	if r.expireDuration > 0 && time.Duration(len(confs))*r.singleNodesTimeout*10 > r.expireDuration {
-		// 要求所有节点累计的超时阈值要小于分布式锁过期时间的十分之一
+		// 要求所有节点累计的超时阈值要小于分布式锁过期时间的十分之一(不能把太多时间浪费在网络通信上，保证用户取得红锁后有充足的时间处理业务逻辑)
+		// expireDuration <=0 为看门狗模式
 		return nil, errors.New("expire thresholds of single node is too long")
 	}
 
@@ -44,7 +46,10 @@ func (r *RedLock) Lock(ctx context.Context) error {
 	var successCnt int
 	for _, lock := range r.locks {
 		startTime := time.Now()
-		err := lock.Lock(ctx)
+		// 保证请求耗时在指定阈值以内
+		_ctx, cancel := context.WithTimeout(ctx, r.singleNodesTimeout)
+		defer cancel()
+		err := lock.Lock(_ctx)
 		cost := time.Since(startTime)
 		if err == nil && cost <= r.singleNodesTimeout {
 			successCnt++
@@ -52,6 +57,8 @@ func (r *RedLock) Lock(ctx context.Context) error {
 	}
 
 	if successCnt < len(r.locks)>>1+1 {
+		// 倘若加锁失败，则进行解锁操作
+		_ = r.Unlock(ctx)
 		return errors.New("lock failed")
 	}
 

@@ -24,11 +24,11 @@ func IsRetryableErr(err error) bool {
 // 基于 redis 实现的分布式锁，不可重入，但保证了对称性
 type RedisLock struct {
 	LockOptions
-	key    string
-	token  string
+	key    string //  分布式锁的唯一标识键 key
+	token  string // 分布式锁使用方的身份标识 token
 	client LockClient
 
-	// 看门狗运作标识
+	// 看门狗运作标识，保证一把锁内最多只有一只看门狗启动
 	runningDog int32
 	// 停止看门狗
 	stopDog context.CancelFunc
@@ -101,7 +101,7 @@ func (r *RedisLock) watchDog(ctx context.Context) {
 		return
 	}
 
-	// 2. 确保之前启动的看门狗已经正常回收
+	// !2. 确保之前启动的看门狗已经正常回收(lockify)
 	for !atomic.CompareAndSwapInt32(&r.runningDog, 0, 1) {
 	}
 
@@ -128,7 +128,7 @@ func (r *RedisLock) runWatchDog(ctx context.Context) {
 
 		// 看门狗负责在用户未显式解锁时，持续为分布式锁进行续期
 		// 通过 lua 脚本，延期之前会确保保证锁仍然属于自己
-		// 为避免因为网络延迟而导致锁被提前释放的问题，watch dog 续约时需要把锁的过期时长额外增加 5 s
+		// !为避免因为网络延迟而导致锁被提前释放的问题，watch dog 续约时需要把锁的过期时长额外增加 5 s
 		_ = r.DelayExpire(ctx, WatchDogWorkStepSeconds+5)
 	}
 }
@@ -206,6 +206,7 @@ func (r *RedisLock) Unlock(ctx context.Context) error {
 	return nil
 }
 
+// 分布式锁的唯一标识键 key.
 func (r *RedisLock) getLockKey() string {
 	return RedisLockKeyPrefix + r.key
 }

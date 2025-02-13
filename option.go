@@ -107,14 +107,16 @@ type LockOptions struct {
 	isBlock             bool
 	blockWaitingSeconds int64
 	expireSeconds       int64
-	watchDogMode        bool
+	// 用户在创建分布式锁时倘若未设置过期时间或者设置过期时间为负值的话，
+	// 该标识会被置为 true，此时看门狗才真正有机会得到启动
+	watchDogMode bool
 }
 
 type RedLockOption func(*RedLockOptions)
 
 type RedLockOptions struct {
-	singleNodesTimeout time.Duration
-	expireDuration     time.Duration
+	singleNodesTimeout time.Duration // 单个节点超时时间
+	expireDuration     time.Duration // 分布式锁过期时间
 }
 
 func WithSingleNodesTimeout(singleNodesTimeout time.Duration) RedLockOption {
@@ -130,7 +132,7 @@ func WithRedLockExpireDuration(expireDuration time.Duration) RedLockOption {
 }
 
 type SingleNodeConf struct {
-	Network  string
+	Network  string // 网络协议
 	Address  string
 	Password string
 	Opts     []ClientOption
